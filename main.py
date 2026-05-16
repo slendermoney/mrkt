@@ -563,8 +563,6 @@ def start():
     )
     log.info("Запущен. Активных аккаунтов: %d", count)
 
-if __name__ == "__main__":
-# Запускаем при старте через gunicorn тоже
 start()
 
 if __name__ == "__main__":
