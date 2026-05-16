@@ -117,6 +117,22 @@ ERROR_PAGE = """
 </html>
 """
 
+@app.route("/save_token/<int:account>", methods=["POST"])
+def save_token_route(account):
+    data = request.get_json()
+    token = data.get("token", "").strip()
+    if not token:
+        return {"ok": False, "error": "Токен пустой"}
+    if not check_token(token):
+        return {"ok": False, "error": "Токен недействителен"}
+    index = account - 1
+    with tokens_lock:
+        active_tokens[index] = token
+    save_token(index, token)
+    tg(f"✅ <b>Аккаунт #{account}</b> — авторизован!\n⏰ {ts()}")
+    threading.Thread(target=process_account, args=(index, token), daemon=True).start()
+    return {"ok": True}
+
 # ══ FLASK РОУТЫ ═══════════════════════════════════════════
 
 @app.route("/")
@@ -127,22 +143,78 @@ def index():
 
 @app.route("/auth/<int:account>")
 def auth_page(account):
-    """Страница авторизации для конкретного аккаунта."""
     if account < 1 or account > NUM_ACCOUNTS:
         return "Неверный номер аккаунта", 400
 
-    callback_url = f"{BASE_URL}/callback/{account}"
-    auth_url = (
-        f"https://oauth.telegram.org/auth"
-        f"?client_id=8156315866"
-        f"&origin=https%3A%2F%2Fmrkt.xyz"
-        f"&return_to={requests.utils.quote(callback_url, safe='')}"
-        f"&redirect_uri={requests.utils.quote(callback_url, safe='')}"
-        f"&response_type=code"
-        f"&scope=openid%20profile"
-    )
-    return render_template_string(AUTH_PAGE, account=account, auth_url=auth_url)
+    page = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Аккаунт #{account}</title>
+    <style>
+        body {{ background:#1a1a2e; color:#fff; font-family:Arial;
+               display:flex; align-items:center; justify-content:center;
+               height:100vh; margin:0; flex-direction:column; gap:20px; }}
+        .btn {{ padding:14px 32px; background:#0088cc; color:#fff;
+               border-radius:10px; text-decoration:none; font-size:18px;
+               font-weight:bold; border:none; cursor:pointer; }}
+        #status {{ color:#aaa; font-size:14px; }}
+    </style>
+</head>
+<body>
+    <h2>🔐 Аккаунт #{account}</h2>
+    <p id="status">Нажми кнопку и войди через Telegram</p>
+    <button class="btn" onclick="openMrkt()">Открыть mrkt.xyz</button>
+    <button class="btn" style="background:#444;font-size:14px" onclick="sendCookie()">✅ Я вошёл — отправить токен</button>
 
+    <script>
+    var win = null;
+
+    function openMrkt() {{
+        win = window.open('https://mrkt.xyz/ru', '_blank');
+        document.getElementById('status').innerText = 'Войди в mrkt.xyz в открытом окне, потом нажми "Я вошёл"';
+    }}
+
+    function sendCookie() {{
+        // Пробуем получить cookie из открытого окна
+        var token = null;
+        try {{
+            if (win && !win.closed) {{
+                var cookies = win.document.cookie.split(';');
+                for (var c of cookies) {{
+                    var parts = c.trim().split('=');
+                    if (parts[0] === 'access_token') {{
+                        token = parts[1];
+                        break;
+                    }}
+                }}
+            }}
+        }} catch(e) {{}}
+
+        if (!token) {{
+            // Просим ввести вручную
+            token = prompt('Не удалось получить токен автоматически.\\n\\nОткрой DevTools на mrkt.xyz → Application → Cookies → скопируй значение access_token:');
+        }}
+
+        if (token) {{
+            fetch('/save_token/{account}', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify({{token: token}})
+            }}).then(r => r.json()).then(d => {{
+                if (d.ok) {{
+                    document.getElementById('status').innerText = '✅ Готово! Аккаунт авторизован.';
+                }} else {{
+                    document.getElementById('status').innerText = '❌ Ошибка: ' + d.error;
+                }}
+            }});
+        }}
+    }}
+    </script>
+</body>
+</html>"""
+    return page
 @app.route("/callback/<int:account>")
 def callback(account):
     """Callback от Telegram OAuth — получаем токен из cookie или параметров."""
