@@ -564,6 +564,9 @@ def start():
     log.info("Запущен. Активных аккаунтов: %d", count)
 
 if __name__ == "__main__":
-    start()
+# Запускаем при старте через gunicorn тоже
+start()
+
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
